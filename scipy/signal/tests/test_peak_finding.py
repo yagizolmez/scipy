@@ -18,7 +18,8 @@ from scipy.signal._peak_finding import (
     _unpack_condition_args,
     find_peaks,
     find_peaks_cwt,
-    _identify_ridge_lines
+    _identify_ridge_lines,
+    envelope
 )
 from scipy.signal.windows import gaussian
 from scipy.signal._peak_finding_utils import _local_maxima_1d, PeakPropertyWarning
@@ -889,3 +890,48 @@ class TestFindPeaksCwt:
         found_locs = find_peaks_cwt(test_data, widths)
 
         np.testing.assert_equal(found_locs, 32)
+
+class TestEnvelope:
+    def test_bad_args(self):
+        msg = "Input array should be a 1D array"
+
+        with raises(ValueError, match=msg):
+            x = 0
+            envelope(x)
+
+        with raises(ValueError, match=msg):
+            x = [[0, 1, 2], [3, 4, 5]]
+            envelope(x)
+
+        with raises(ValueError, match=msg):
+            x = np.array([[0, 1], [2, 3]])
+            envelope(x)
+
+        msg = 'If N is not None, it must be a positive integer.'
+        x = np.array([0, 1, 2, 3, 4, 5])
+
+        with raises(ValueError, match=msg):
+            envelope(x, N=-1)
+
+        with raises(ValueError, match=msg):
+            envelope(x, N=0)
+
+        with raises(ValueError, match=msg):
+            envelope(x, N=[0, 1])
+
+        msg = ('N cannot be None when using the rms method; '
+               'it must specify the sliding window length.')
+
+        with raises(ValueError, match=msg):
+            envelope(x, method='rms')
+
+        msg = ('N cannot be None when using the peak method; it must specify'
+               'the minimal horizontal distance between neighbouring peaks')
+
+        with raises(ValueError, match=msg):
+            envelope(x, method='peak')
+
+        msg = 'linear is not a valid method'
+
+        with raises(ValueError, match=msg):
+            envelope(x, method='linear')

@@ -6,6 +6,8 @@ import numpy as np
 
 from scipy.signal._wavelets import _cwt, _ricker
 from scipy.stats import scoreatpercentile
+from scipy.interpolate import UnivariateSpline
+from scipy.signal._signaltools import hilbert,convolve
 
 from ._peak_finding_utils import (
     _local_maxima_1d,
@@ -16,7 +18,7 @@ from ._peak_finding_utils import (
 
 
 __all__ = ['argrelmin', 'argrelmax', 'argrelextrema', 'peak_prominences',
-           'peak_widths', 'find_peaks', 'find_peaks_cwt']
+           'peak_widths', 'find_peaks', 'find_peaks_cwt', 'envelope']
 
 
 def _boolrelextrema(data, comparator, axis=0, order=1, mode='clip'):
@@ -1310,3 +1312,112 @@ def find_peaks_cwt(vector, widths, wavelet=None, max_distances=None,
     max_locs.sort()
 
     return max_locs
+
+def envelope(x, N=None, method='analytic'):
+    """
+    Calculate the upper and lower envelopes of a 1-D signal.
+
+    By default, the envelopes of `x` are calculated by the magnitude of its
+    analytical signal.
+
+    Parameters
+    ----------
+    x : array_like
+        The 1D-array that holds the signal data for which the envelopes are
+        going to be calculated.
+    N : int
+        If `method` = `'analytic'`, `N` is the number of Fourier components. If
+        `method` = `'rms'`, `N` is the sliding window length. If `method` =
+        `'peak'`, `N` is the required minimal horizontal distance between
+        neighbouring peaks. For the `'rms'` and `'peak'` methods `N` must be
+        specified and must be positive. Default: ``x.shape[0]``
+    method : str {`'analytic'`, `'rms'`, `'peak'`}, optional
+        A string indicating which method to use to calculate the envelopes.
+
+        ``analytic``
+           The envelopes of x are calculated by the magnitude of its
+           analytical signal.
+        ``rms``
+           Calculates the upper and lower root-mean-square envelopes of `x`. The
+           mean is determined by a sliding window of `N` samples.
+        ``peak``
+           Calculates the upper and lower peak envelopes of `x`. The envelopes
+           are determined by employing spline interpolation between adjacent
+           local maxima that are at least `N` samples apart.
+
+    Returns
+    -------
+    upper : ndarray
+        The upper envelope of the signal.
+    lower : ndarray
+        The lower envelope of the signal.
+
+    See Also
+    --------
+    hilbert : Compute the analytic signal, using the Hilbert transform.
+    find_peaks : Find peaks inside a signal based on peak properties.
+
+    Examples
+    --------
+
+    >>> import numpy as np
+    >>> from scipy.signal import envelope
+    >>> import matplotlib.pyplot as plt
+
+    Create a signal and calculate its analytical envelopes.
+
+    >>> t = np.arange(0, 2, 1/2000)
+    >>> signal = (1 + 0.5 * np.cos(2 * np.pi * 1 * t))*np.cos(2 * np.pi * 10 * t) + 5
+    >>> upper, lower = envelope(signal)
+    >>> plt.plot(t, signal)
+    >>> plt.plot(t, upper)
+    >>> plt.plot(t, lower)
+    >>> plt.show()
+
+    Generate an amplitude modulated gaussian white noise and calculate its
+    root-mean-square envelopes.
+
+    >>> t = np.arange(0, 2, 1/2000)
+    >>> gaussian_white_noise = np.random.normal(size=t.shape[0])
+    >>> signal = (1 + 0.5 * np.cos(2 * np.pi * 1 * t))*gaussian_white_noise + 5
+    >>> upper, lower = envelope(signal, N=150, method='rms')
+    >>> plt.plot(t, signal)
+    >>> plt.plot(t, upper)
+    >>> plt.plot(t, lower)
+    >>> plt.show()
+
+    .. versionadded:: 1.12.0
+    """
+    x = np.squeeze(np.asarray(x))
+    if x.ndim != 1:
+        raise ValueError("Input array should be a 1D array")
+    if N is not None and (not isinstance(N, int) or N <= 0):
+        raise ValueError('If N is not None, it must be a positive integer.')
+    if method == 'analytic':
+        x_mean = np.mean(x)
+        x_zero_mean = x - x_mean
+        zero_mean_envelope = np.abs(hilbert(x_zero_mean, N=N))
+        return x_mean + zero_mean_envelope, x_mean - zero_mean_envelope
+    elif method == 'rms':
+        if N is None:
+            raise ValueError('N cannot be None when using the rms method; '
+                             'it must specify the sliding window length.')
+        x_mean = np.mean(x)
+        x_zero_mean = x - x_mean
+        zero_mean_envelope = np.sqrt(convolve(x_zero_mean**2, np.ones(N)/N,
+                                             mode='same', method='direct'))
+        return x_mean + zero_mean_envelope, x_mean - zero_mean_envelope
+    elif method == 'peak':
+        if N is None:
+            msg = ('N cannot be None when using the peak method; it must specify'
+                   'the minimal horizontal distance between neighbouring peaks')
+            raise ValueError(msg)
+        peaks_upper, _ = find_peaks(x, distance=N)
+        peaks_lower, _ = find_peaks(-x, distance=N)
+        upper_spline = UnivariateSpline(peaks_upper, x[peaks_upper])
+        lower_spline = UnivariateSpline(peaks_lower, x[peaks_lower])
+        upper_envelope = upper_spline(np.arange(x.shape[0]))
+        lower_envelope = lower_spline(np.arange(x.shape[0]))
+        return upper_envelope, lower_envelope
+    else:
+        raise ValueError(f'{method} is not a valid method')
